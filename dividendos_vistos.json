@@ -1,1 +1,14 @@
-{}
+{
+  "ALICORP S.A.A.|31/03/2026": {
+    "empresa": "ALICORP S.A.A.",
+    "fecha_junta": "31/03/2026",
+    "monto": "S/ 0.37306238",
+    "detectado": "28/03/2026"
+  },
+  "INRETAIL PERÃ CORP.|31/03/2026": {
+    "empresa": "INRETAIL PERÃ CORP.",
+    "fecha_junta": "31/03/2026",
+    "monto": "US$0.919567",
+    "detectado": "28/03/2026"
+  }
+}
