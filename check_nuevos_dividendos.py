@@ -1,9 +1,9 @@
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 import os
 import json
 import subprocess
+import re
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -12,12 +12,9 @@ STATE_FILE = "dividendos_vistos.json"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     r = requests.post(url, json=payload)
-    print(f"Telegram response: {r.status_code} - {r.text}")
+    print(f"Telegram: {r.status_code} - {r.text[:200]}")
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -38,49 +35,42 @@ def commit_state():
         subprocess.run(["git", "commit", "-m", "Update dividendos vistos"], check=True)
         subprocess.run(["git", "push"], check=True)
 
-def check_nuevos():
+def parse_dividendos():
     response = requests.get(BVL_URL, timeout=30)
     response.encoding = "latin-1"
-    soup = BeautifulSoup(response.text, "html.parser")
+    clean = re.sub(r'<[^>]+>', '', response.text)
+    date_pat = re.compile(r'^\d{2}/\d{2}/\d{4}$')
+    amount_pat = re.compile(r'\d')
+    dividendos = []
+    for line in clean.splitlines():
+        parts = [p.strip() for p in line.split('\t') if p.strip()]
+        if len(parts) < 7:
+            continue
+        fecha_idx = next((i for i, p in enumerate(parts) if date_pat.match(p)), None)
+        if fecha_idx is None or fecha_idx == 0:
+            continue
+        empresa = parts[0]
+        efec = parts[-2]
+        if efec in ["-.-", "-", ""] or not amount_pat.search(efec):
+            continue
+        dividendos.append({"empresa": empresa, "fecha_junta": parts[fecha_idx], "monto": efec})
+    return dividendos
 
-    tables = soup.find_all("table")
+def check_nuevos():
     estado_actual = load_state()
     nuevos = []
-
-    for table in tables:
-        rows = table.find_all("tr")
-        for row in rows:
-            cells = row.find_all("td")
-            if len(cells) >= 9:
-                empresa = cells[0].get_text(strip=True)
-                fecha_junta = cells[1].get_text(strip=True)
-                efec = cells[8].get_text(strip=True)
-
-                if not empresa or not fecha_junta:
-                    continue
-
-                if efec in ["-.-", "", "-"]:
-                    continue
-
-                clave = f"{empresa}|{fecha_junta}"
-
-                if clave not in estado_actual:
-                    nuevos.append({
-                        "empresa": empresa,
-                        "fecha_junta": fecha_junta,
-                        "monto": efec
-                    })
-                    estado_actual[clave] = {
-                        "empresa": empresa,
-                        "fecha_junta": fecha_junta,
-                        "monto": efec,
-                        "detectado": datetime.now().strftime("%d/%m/%Y")
-                    }
-
+    dividendos = parse_dividendos()
+    print(f"Total con dividendo en pagina: {len(dividendos)}")
+    for d in dividendos:
+        print(f"  {d['empresa']} | {d['fecha_junta']} | {d['monto']}")
+        clave = f"{d['empresa']}|{d['fecha_junta']}"
+        if clave not in estado_actual:
+            nuevos.append(d)
+            estado_actual[clave] = {**d, "detectado": datetime.now().strftime("%d/%m/%Y")}
     if nuevos:
         hoy = datetime.now().strftime("%d/%m/%Y")
         for d in nuevos:
-            mensaje = (
+            msg = (
                 f"Nuevo dividendo anunciado en BVL\n"
                 f"Detectado el {hoy}\n\n"
                 f"Empresa: {d['empresa']}\n"
@@ -88,11 +78,10 @@ def check_nuevos():
                 f"Dividendo: {d['monto']}\n\n"
                 f"Fuente: Bolsa de Valores de Lima"
             )
-            send_telegram(mensaje)
+            send_telegram(msg)
         print(f"Enviadas {len(nuevos)} nuevas alertas.")
     else:
         print("No hay nuevos dividendos anunciados.")
-
     save_state(estado_actual)
     commit_state()
 
