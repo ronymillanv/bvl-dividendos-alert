@@ -4,6 +4,7 @@ import os
 import json
 import subprocess
 import re
+from html.parser import HTMLParser
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
@@ -35,25 +36,55 @@ def commit_state():
         subprocess.run(["git", "commit", "-m", "Update dividendos vistos"], check=True)
         subprocess.run(["git", "push"], check=True)
 
+class TableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self.current_row = None
+        self.current_cell = None
+        self.in_td = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self.current_row = []
+        elif tag == "td" and self.current_row is not None:
+            self.current_cell = ""
+            self.in_td = True
+
+    def handle_endtag(self, tag):
+        if tag == "td" and self.in_td:
+            if self.current_row is not None:
+                self.current_row.append(self.current_cell.strip())
+            self.current_cell = None
+            self.in_td = False
+        elif tag == "tr" and self.current_row is not None:
+            self.rows.append(self.current_row)
+            self.current_row = None
+
+    def handle_data(self, data):
+        if self.in_td and self.current_cell is not None:
+            self.current_cell += data
+
 def parse_dividendos():
     response = requests.get(BVL_URL, timeout=30)
     response.encoding = "latin-1"
-    clean = re.sub(r'<[^>]+>', '', response.text)
+    parser = TableParser()
+    parser.feed(response.text)
     date_pat = re.compile(r'^\d{2}/\d{2}/\d{4}$')
     amount_pat = re.compile(r'\d')
     dividendos = []
-    for line in clean.splitlines():
-        parts = [p.strip() for p in line.split('\t') if p.strip()]
-        if len(parts) < 7:
+    for row in parser.rows:
+        clean = [c.strip() for c in row if c.strip()]
+        if len(clean) < 7:
             continue
-        fecha_idx = next((i for i, p in enumerate(parts) if date_pat.match(p)), None)
+        fecha_idx = next((i for i, c in enumerate(clean) if date_pat.match(c)), None)
         if fecha_idx is None or fecha_idx == 0:
             continue
-        empresa = parts[0]
-        efec = parts[-2]
+        empresa = clean[0]
+        efec = clean[-2]
         if efec in ["-.-", "-", ""] or not amount_pat.search(efec):
             continue
-        dividendos.append({"empresa": empresa, "fecha_junta": parts[fecha_idx], "monto": efec})
+        dividendos.append({"empresa": empresa, "fecha_junta": clean[fecha_idx], "monto": efec})
     return dividendos
 
 def check_nuevos():
