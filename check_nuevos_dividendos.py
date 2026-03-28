@@ -14,10 +14,10 @@ def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "HTML"
+        "text": message
     }
-    requests.post(url, json=payload)
+    r = requests.post(url, json=payload)
+    print(f"Telegram response: {r.status_code} - {r.text}")
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -79,17 +79,19 @@ def check_nuevos():
 
     if nuevos:
         hoy = datetime.now().strftime("%d/%m/%Y")
-        mensaje = f"<b>Nuevo dividendo anunciado en BVL</b>\n"
-        mensaje += f"Detectado el {hoy}\n\n"
         for d in nuevos:
-            mensaje += f"<b>{d['empresa']}</b>\n"
-            mensaje += f"   Fecha de junta: {d['fecha_junta']}\n"
-            mensaje += f"   Dividendo: {d['monto']}\n\n"
-        mensaje += "Fuente: Bolsa de Valores de Lima"
-        send_telegram(mensaje)
+            mensaje = (
+                f"Nuevo dividendo anunciado en BVL\n"
+                f"Detectado el {hoy}\n\n"
+                f"Empresa: {d['empresa']}\n"
+                f"Fecha de junta: {d['fecha_junta']}\n"
+                f"Dividendo: {d['monto']}\n\n"
+                f"Fuente: Bolsa de Valores de Lima"
+            )
+            send_telegram(mensaje)
         print(f"Enviadas {len(nuevos)} nuevas alertas.")
     else:
-        print("No hay nuevos dividendos anunciados hoy.")
+        print("No hay nuevos dividendos anunciados.")
 
     save_state(estado_actual)
     commit_state()
